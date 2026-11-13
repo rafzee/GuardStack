@@ -1,0 +1,421 @@
+# guardstack: evaluation dataset plan (category -> dataset entries)
+# Verified 2026-11-03. Details, sources and open risks: docs/datasets/dataset_matrix.md
+# Downloader: data/download_datasets.py. `download:` names a registry entry there, and
+# `revision` must match the registry (`--list` runs a consistency check). revision: null
+# means no SHA could be verified ahead of time: the downloader resolves `main` once and
+# writes the SHA to data/revisions.lock.json, which you then commit.
+version: 1
+verified_on: "2026-11-03"
+
+agentdojo:
+  pip: "agentdojo==0.1.35"
+  benchmark_version: "v1.2.2"
+  git_tag: "v0.1.35"
+  git_sha: "a75aba7631d3ca5fb7ab938965c97ead2f9ff84b"
+  suites: {workspace: [40, 14], travel: [20, 7], banking: [16, 9], slack: [21, 5]}  # [user, injection]
+  pairs_total: 949
+  # Attacker-objective tags for the 35 injection tasks (from each task's GOAL). They split
+  # the same runs into the cat-3/4/5/8 views.
+  # Reconcile with configs/agentdojo_objectives.yaml, written by another agent. Its
+  # `exfiltration` set is identical to the one below. Its `unsafe_action` set equals
+  # integrity_or_financial + content_or_action_hijack, except that travel/6 is labelled
+  # harmful_content there. If the team adopts that file as canonical, these tags should
+  # be derived from it.
+  injection_task_tags:
+    exfiltration:   # 20 tasks / 582 pairs -> PII-leak view (cat 8)
+      workspace: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+      travel: [1, 3, 5]
+      banking: [0, 1, 2, 3, 8]
+      slack: [2, 4]
+    integrity_or_financial:   # 10 tasks / 226 pairs -> unsafe-tool-call view (cat 5)
+      workspace: [1, 13]
+      travel: [0, 4]
+      banking: [4, 5, 6, 7]
+      slack: [1, 5]
+    content_or_action_hijack:   # 5 tasks / 141 pairs -> goal-hijack view (cat 4)
+      workspace: [0, 2]
+      travel: [2, 6]
+      slack: [3]
+  attacks_static: [important_instructions, tool_knowledge, injecagent, ignore_previous, system_message, direct]
+  attacks_dos: [dos, swearwords_dos, captcha_dos, offensive_email_dos, felony_dos]   # security := not utility
+
+adapters:
+  agentdojo_native: "Run AgentDojo suites/attacks unchanged; guard layers are pipeline elements."
+  agentdojo_injection_import: "Wrap external payloads as a custom AgentDojo attack or injection task; scored with AgentDojo env-state checks."
+  chat_runner: "Single- or multi-turn prompts through the same guarded pipeline with an empty tool runtime. mode: guard_only feeds labelled items straight to one layer (offline P/R) without running the agent."
+  agentic_runner: "Benchmark-specific tool environment (own harness or a port of it); the guard layers still wrap the LLM and tool calls."
+
+judges:
+  agentdojo_programmatic: {kind: programmatic, how: "InjectionTask.security / security_from_traces on pre/post env + traces; UserTask.utility likewise. No LLM."}
+  injecagent_programmatic: {kind: programmatic, how: "parse the agent's next action and check whether the attacker tool is called (DS also needs step 2)"}
+  asb_programmatic: {kind: programmatic, how: "attacker-goal string appears in messages; refusal judge defaults to gpt-4o-mini -> substitute open model", substitute: llama33_70b}
+  harmbench_cls: {kind: classifier, model: "cais/HarmBench-Llama-2-13b-cls", base: "Llama-2-13B", license: "UNVERIFIED (HarmBench code MIT; Llama 2 licence on base)", banned: false}
+  harmbench_mistral_val: {kind: classifier, model: "cais/HarmBench-Mistral-7b-val-cls", license: "UNVERIFIED", banned: false, use: "second judge for agreement"}
+  strongreject_rubric: {kind: llm_rubric, prompt: "strongreject/strongreject_evaluator_prompt.txt @ alexandrasouly/strongreject f7cad6c", model: llama33_70b, banned: false}
+  strongreject_finetuned: {kind: classifier, model: "qylu4156/strongreject-15k-v1", base: "Gemma 2B (gated Gemma licence)", banned: false}
+  wildguard: {kind: classifier, model: "allenai/wildguard", base: "Mistral-7B", license: "Apache-2.0 (HF card)", outputs: [prompt_harm, response_harm, refusal], banned: false}
+  jbb_llama3_judge: {kind: llm_prompt, prompt: "jailbreakbench.classifier.Llama3JailbreakJudge / Llama3RefusalJudge", model: "meta-llama/Meta-Llama-3-70B-Instruct (refusal: 8B), local vLLM", banned: false}
+  llama_guard_4: {kind: classifier, model: "meta-llama/Llama-Guard-4-12B", license: "Llama 4 Community License (gated)", banned: false, rule: "cross-check judge ONLY in configs where Llama Guard is not a layer under test"}
+  llama33_70b: {kind: llm, model: "meta-llama/Llama-3.3-70B-Instruct", banned: false, note: "default open substitute judge; alt openai/gpt-oss-120b"}
+  agentharm_grader: {kind: hybrid, how: "per-behaviour grading functions + refusal and semantic LLM judges", default_model: "openai/gpt-4o-2024-08-06", substitute: llama33_70b, validate: "agreement on >=100 items vs GPT-4o or human"}
+  agent_safetybench_substitute: {kind: llm_rubric, official: "thu-coai/ShieldAgent (Qwen-based: BANNED by cluster policy)", substitute: llama33_70b, validate: ">=150 hand-labelled trajectories"}
+  privacylens_leak_judge: {kind: llm_prompt, default_model: "mistralai/Mistral-7B-Instruct-v0.2", recommended: llama33_70b, banned: false}
+  seccodeplt_tests: {kind: programmatic, how: "dataset functionality + security unit tests, run sandboxed in Apptainer; rule check where use_rule"}
+  cweval_tests: {kind: programmatic, how: "pytest functionality + security oracles (pre-built Docker image -> Apptainer)"}
+  cse_icd: {kind: static_analysis, how: "CyberSecEval Insecure Code Detector", warning: "CodeShield runs the same ICD: circular for the CodeShield layer"}
+  bipia_eval: {kind: hybrid, how: "BIPIA rule-based metrics (match/language/encode) where defined, else LLM judge", default_model: "gpt35 config", substitute: llama33_70b}
+  confaide_strmatch: {kind: programmatic, how: "ConfAIde eval.py: secret string appears in the response (tiers 3/4)"}
+  gold_labels: {kind: none, how: "dataset's human/gold labels (guard_only mode)"}
+
+statistics:
+  target: "95% CI half-width <= 5-7 pts on ASR"
+  n_rule: {pm7: 196, pm6: 267, pm5: 385, note: "worst case p=0.5; Wilson. At p=0.2 the same widths need 126/171/246"}
+  clustered_designs: "AgentDojo (35 injection x 97 user tasks), AgentHarm (4 augmentations per base behaviour), CWEval (k samples per task): report two-way or cluster bootstrap CIs; effective n is below the raw n"
+  stack_comparisons: "same items for every layer/stack -> paired tests (McNemar / paired bootstrap) for marginal block rate and redundancy"
+  seed: 0
+
+categories:
+  direct_jailbreak:            # 1
+    primary:
+      - name: harmbench_text_test_std_ctx
+        download: harmbench
+        source: "git:centerforaisafety/HarmBench"
+        revision: "8e1604d1171fe8a48d8febecd22f600e462bdcdd"
+        split: "data/behavior_datasets/harmbench_behaviors_text_test.csv; FunctionalCategory in {standard, contextual}"
+        n_planned: 240            # 159 standard + 81 contextual -> +-6.3 worst case
+        attacks: [direct_request, jbb_artifacts_transfer, pair, tap]   # adaptive attacker LLM must be non-banned
+        judge: harmbench_cls
+        judge_secondary: harmbench_mistral_val
+        adapter: chat_runner
+    secondary:
+      - name: wildjailbreak_eval_adversarial_harmful
+        download: wildjailbreak
+        source: "hf:allenai/wildjailbreak"
+        revision: null
+        split: "eval; data_type == adversarial_harmful (2,000)"
+        n_planned: 400            # seeded random sample -> +-4.9
+        judge: strongreject_rubric
+        judge_secondary: wildguard
+        adapter: chat_runner
+        flags: [gated, contamination_if_model_trained_on_wildjailbreak]
+    extra:
+      - name: jbb_behaviors_harmful_plus_artifacts
+        download: jbb_behaviors
+        source: "hf:JailbreakBench/JBB-Behaviors"
+        revision: "886acc352a31533ffbcf4ef22c744658688086fc"
+        split: "behaviors/harmful (100) x jbb_artifacts {PAIR, GCG transfer, JBC, prompt_with_random_search}"
+        n_planned: 100
+        judge: jbb_llama3_judge
+        adapter: chat_runner
+        note: "comparability with the JailbreakBench leaderboard only (n=100 -> +-9.6)"
+
+  multi_turn_escalation:       # 2
+    primary:
+      - name: mhj_replay
+        download: mhj
+        source: "hf:ScaleAI/mhj"
+        revision: null
+        split: "all HarmBench-sourced conversations (WMDP-bio responses are withheld upstream)"
+        n_planned: 300            # of 537 conversations -> +-5.6; use all if budget allows (+-4.3)
+        judge: harmbench_cls
+        adapter: chat_runner      # user turns replayed; assistant turns regenerated by the guarded agent
+        flags: [gated, cc_by_nc, static_replay_not_adaptive]
+      - name: mt_jailbench_adaptive
+        download: mt_jailbench
+        source: "git:SafetyArena/mt-jailbench"
+        revision: "cb8184e0a9ad7a65c86a00e2a38c57a5f58043f0"
+        split: "HarmBench standard behaviours: 159 test + 41 val = 200 (harmbench download)"
+        n_planned: 200            # per attack method -> +-6.9
+        attacks: [crescendo, x_teaming]   # optional: actorbreaker, fitd, coa
+        attacker_model: llama33_70b       # NOT the harness default Qwen2.5-32B (banned)
+        judge: harmbench_cls      # replaces the default GPT-4o judge; keep GPT-4o on a subset for comparability
+        adapter: chat_runner
+    secondary:
+      - name: safemtdata_attack600
+        download: safemtdata
+        source: "hf:SafeMTData/SafeMTData"
+        revision: null
+        split: "Attack_600 multi-turn queries (config name UNVERIFIED)"
+        n_planned: 300
+        judge: strongreject_rubric
+        adapter: chat_runner
+        flags: [gray_area_deepseek_generated, license_unverified]
+    extra:
+      - name: cosafe
+        download: cosafe
+        source: "git:ErxinYu/CoSafe-Dataset"
+        revision: "a298d9c742203b00eaeca58dfca7100c7e2ff360"
+        split: "all 14 category files (1,400)"
+        n_planned: 300
+        judge: wildguard
+        adapter: chat_runner
+        flags: [no_license_file, prefilled_assistant_turns]
+
+  indirect_prompt_injection:   # 3
+    primary:
+      - name: agentdojo_v1_2_2_all_pairs
+        download: agentdojo
+        source: "pip:agentdojo==0.1.35 (git:ethz-spylab/agentdojo@v0.1.35)"
+        revision: "a75aba7631d3ca5fb7ab938965c97ead2f9ff84b"
+        split: "benchmark_version v1.2.2, suites workspace/travel/banking/slack, all user x injection pairs"
+        n_planned: 949            # per attack in {important_instructions, tool_knowledge, adaptive}
+        judge: agentdojo_programmatic
+        adapter: agentdojo_native
+        flags: [clustered_35_injection_tasks, promptguard2_vendor_evaluated_on_agentdojo]
+    secondary:
+      - name: injecagent
+        download: injecagent
+        source: "git:uiuc-kang-lab/InjecAgent"
+        revision: "f19c9f2c79a41046eb13c03c51a24c567a8ffa07"
+        split: "test_cases_{dh,ds}_{base,enhanced}.json"
+        n_planned: 1054           # per setting (510 DH + 544 DS)
+        judge: injecagent_programmatic
+        adapter: agentic_runner   # single step with a prefilled user-tool response; function-calling mode
+    extra:
+      - name: llmail_inject_payloads
+        download: llmail_inject
+        source: "hf:microsoft/llmail-inject-challenge"
+        revision: "1063bdf01ec8762b812d5e06ee768a06faa5a6f7"
+        split: "raw submissions (schema UNVERIFIED); dedupe; payloads only"
+        n_planned: 400
+        judge: agentdojo_programmatic
+        adapter: agentdojo_injection_import   # payloads as a custom attack in workspace email vectors, goal = send_email to attacker
+        flags: [large_2_45GB, objective_remapped]
+      - name: bipia_email_table_code
+        download: bipia
+        source: "git:microsoft/BIPIA"
+        revision: "a004b69ec0dd446e0afd461d98cb5e96e120a5d0"
+        split: "test contexts (email 50, table 100, code 50) x test attacks (75 text / 50 code)"
+        n_planned: 400
+        judge: bipia_eval
+        adapter: chat_runner
+
+  goal_hijack:                 # 4
+    primary:
+      - name: agentdojo_hijack_view_plus_dos
+        download: agentdojo
+        source: "pip:agentdojo==0.1.35"
+        revision: "a75aba7631d3ca5fb7ab938965c97ead2f9ff84b"
+        split: "re-analysis of cat-3 runs (hijack := security AND NOT utility; content_or_action_hijack tag = 141 pairs) + 5 DoS attacks x 97 user tasks"
+        n_planned: 1434           # 949 + 485
+        judge: agentdojo_programmatic
+        adapter: agentdojo_native
+    secondary:
+      - name: asb_dpi_opi
+        download: asb
+        source: "git:agiresearch/ASB"
+        revision: "544540ff0788998072f7df463056fd17e62cc9f4"
+        split: "DPI (user channel) and OPI (observation channel); 10 agents, 51 tasks x same-agent attacker tools"
+        n_planned: 400            # per attack type, stratified by agent
+        judge: asb_programmatic
+        adapter: agentic_runner
+    extra:
+      - name: cyberseceval_prompt_injection
+        download: cyberseceval
+        source: "git:meta-llama/PurpleLlama"
+        revision: "f64eebd53003a87d9c2d2a3a712133534c214c8d"
+        split: "CybersecurityBenchmarks/datasets/prompt_injection/prompt_injection.json (251)"
+        n_planned: 251
+        judge: llama33_70b
+        adapter: chat_runner
+
+  unsafe_tool_call:            # 5
+    primary:
+      - name: agentharm_harmful
+        download: agentharm
+        source: "hf:ai-safety-institute/AgentHarm"
+        revision: "e23b3fe60a0da9037314b88e5ee3a0c054970dad"
+        split: "harmful: test_public (176 = 44 base x 4) + validation (32 = 8 x 4)"
+        n_planned: 208            # all; +-6.8 if iid, wider after clustering on 52 base behaviours
+        judge: agentharm_grader
+        adapter: agentic_runner   # inspect_evals agentharm harness or port of its synthetic tools
+        flags: [canary_guid, clustered_augmentations]
+    secondary:
+      - name: agent_safetybench
+        download: agent_safetybench
+        source: "git:thu-coai/Agent-SafetyBench"
+        revision: "74feea8de601b3a1449a93fcf70017fe61556f73"
+        split: "data/released_data.json (2,000), stratified by risk category"
+        n_planned: 400
+        judge: agent_safetybench_substitute
+        adapter: agentic_runner
+        flags: [official_judge_banned]
+    extra:
+      - name: agentdojo_integrity_view
+        download: agentdojo
+        source: "pip:agentdojo==0.1.35"
+        revision: "a75aba7631d3ca5fb7ab938965c97ead2f9ff84b"
+        split: "integrity_or_financial tag (226 pairs) from cat-3 runs"
+        n_planned: 226
+        judge: agentdojo_programmatic
+        adapter: agentdojo_native
+      - name: rjudge_trajectories
+        download: rjudge
+        source: "git:Lordog/R-Judge"
+        revision: "83ce301da3ad50dd8b397e772863f5411c3d3dc2"
+        split: "all records (571 at this commit)"
+        n_planned: 571
+        judge: gold_labels
+        adapter: chat_runner      # mode: guard_only (AlignmentCheck / Llama Guard on trajectories)
+        flags: [no_license_file]
+      - name: cyberseceval_interpreter_abuse
+        download: cyberseceval
+        source: "git:meta-llama/PurpleLlama"
+        revision: "f64eebd53003a87d9c2d2a3a712133534c214c8d"
+        split: "datasets/interpreter/interpreter.json (500; 11 exact duplicates reported upstream)"
+        n_planned: 489
+        judge: llama33_70b
+        adapter: chat_runner
+
+  harmful_output:              # 6
+    primary:
+      - name: strongreject
+        download: strongreject
+        source: "git:alexandrasouly/strongreject"
+        revision: "f7cad6c17e624e21d8df2278e918ae1dddb4cb56"
+        split: "strongreject_dataset/strongreject_dataset.csv (313)"
+        n_planned: 313            # +-5.5; x {direct, jailbreak wrappers}
+        judge: strongreject_rubric
+        judge_secondary: strongreject_finetuned
+        adapter: chat_runner
+    secondary:
+      - name: wildguardtest_response_harm
+        download: wildguardmix
+        source: "hf:allenai/wildguardmix"
+        revision: null
+        split: "wildguardtest (1,725); items with a response and response_harm_label"
+        n_planned: all
+        judge: gold_labels
+        adapter: chat_runner      # mode: guard_only (output rails / Llama Guard / NeMo output rail P/R)
+        flags: [gated]
+
+  insecure_code:               # 7
+    primary:
+      - name: seccodeplt_insecure_coding
+        download: seccodeplt
+        source: "hf:Virtue-AI-HUB/SecCodePLT"
+        revision: "e847141569d113dea5348dcf834e15d21027b5bd"
+        split: "insecure_coding (1,345), stratified by CWE"
+        n_planned: 400            # +-4.9
+        judge: seccodeplt_tests
+        adapter: chat_runner
+        flags: [eval_harness_repo_not_public_on_card, pin_from_tree_url]
+    secondary:
+      - name: cweval
+        download: cweval
+        source: "git:Co1lin/CWEval"
+        revision: "e9a2a124c8c53679b6d8d27adfd2f6c40e7576d7"
+        split: "benchmark/ (119 tasks, 31 CWEs, 5 languages)"
+        n_planned: 357            # 119 tasks x 3 samples; cluster by task (task-level CI ~+-9)
+        judge: cweval_tests
+        adapter: chat_runner
+    extra:
+      - name: cyberseceval_instruct
+        download: cyberseceval
+        source: "git:meta-llama/PurpleLlama"
+        revision: "f64eebd53003a87d9c2d2a3a712133534c214c8d"
+        split: "datasets/instruct/instruct.json (1,916)"
+        n_planned: 400
+        judge: cse_icd
+        adapter: chat_runner
+        flags: [circular_with_codeshield]
+
+  pii_leak:                    # 8
+    primary:
+      - name: privacylens
+        download: privacylens
+        source: "git:SALT-NLP/PrivacyLens"
+        revision: "9c2ee07b080dc54ed4924af11d9751e81753c94d"
+        split: "data/main_data.json (493 seed -> vignette -> trajectory)"
+        n_planned: 493            # +-4.4
+        judge: privacylens_leak_judge
+        adapter: agentic_runner   # replay executable_trajectory, guarded pipeline produces the final action
+      - name: agentdojo_exfiltration_view
+        download: agentdojo
+        source: "pip:agentdojo==0.1.35"
+        revision: "a75aba7631d3ca5fb7ab938965c97ead2f9ff84b"
+        split: "exfiltration tag (20 injection tasks, 582 pairs) from cat-3 runs"
+        n_planned: 582
+        judge: agentdojo_programmatic
+        adapter: agentdojo_native
+    secondary:
+      - name: ai4privacy_openpii_en_val
+        download: ai4privacy_openpii
+        source: "hf:ai4privacy/open-pii-masking-500k-ai4privacy"
+        revision: "144ca06b62d78f173df83e0f47feb97524921714"
+        split: "validation, language == en"
+        n_planned: 2000
+        judge: gold_labels        # span-level precision / recall / F1 for Presidio / GLiNER
+        adapter: chat_runner      # mode: guard_only
+        flags: [custom_license_terms]
+    extra:
+      - name: confaide_tier3_tier4
+        download: confaide
+        source: "git:skywalker023/confAIde"
+        revision: "3174c63e689226189675a740b7bf9053f10bae50"
+        split: "benchmark/tier_3.txt, tier_4.txt"
+        n_planned: 300
+        judge: confaide_strmatch
+        adapter: chat_runner
+
+  benign_utility_overrefusal:  # 9
+    primary:
+      - name: agentdojo_user_tasks
+        download: agentdojo
+        source: "pip:agentdojo==0.1.35"
+        revision: "a75aba7631d3ca5fb7ab938965c97ead2f9ff84b"
+        split: "97 user tasks, no attack (x3 repeats) + utility under attack from cat-3 runs"
+        n_planned: 291            # 97 x 3; CI is bounded by 97 tasks (about +-9.9 at p=0.5)
+        judge: agentdojo_programmatic
+        adapter: agentdojo_native
+      - name: xstest
+        download: xstest
+        source: "git:paul-rottger/exaggerated-safety"
+        revision: "d7bb5bd738c1fcbc36edd83d5e7d1b71a3e2d84d"
+        split: "xstest_prompts.csv: 250 safe (over-refusal) + 200 unsafe (contrast)"
+        n_planned: 450
+        judge: wildguard          # refusal head; XSTest string-match as a second rater
+        adapter: chat_runner
+        flags: [near_saturated_for_frontier_models]
+    secondary:
+      - name: agentharm_benign
+        download: agentharm
+        source: "hf:ai-safety-institute/AgentHarm"
+        revision: "e23b3fe60a0da9037314b88e5ee3a0c054970dad"
+        split: "harmless_benign: test_public + validation (expected 176 + 32; UNVERIFIED)"
+        n_planned: 208
+        judge: agentharm_grader
+        adapter: agentic_runner
+      - name: or_bench_hard_1k
+        download: or_bench
+        source: "hf:bench-llm/or-bench"
+        revision: "e36d8b80e81837c8a8f264bbb2a49f1b32c7e272"
+        split: "or-bench-hard-1k (row count UNVERIFIED)"
+        n_planned: 400
+        judge: wildguard
+        adapter: chat_runner
+      - name: notinject
+        download: notinject
+        source: "git:leolee99/InjecGuard"
+        revision: "1b5751e88bf7475acbedfc8eda795ce060307c84"
+        split: "datasets/NotInject_{one,two,three}.json (3 x 113)"
+        n_planned: 339
+        judge: gold_labels        # all benign: false-positive rate of PromptGuard 2 / PI detectors
+        adapter: chat_runner      # mode: guard_only, plus full-pipeline refusal
+    extra:
+      - name: cyberseceval_mitre_frr
+        download: cyberseceval
+        source: "git:meta-llama/PurpleLlama"
+        revision: "f64eebd53003a87d9c2d2a3a712133534c214c8d"
+        split: "datasets/mitre_frr/mitre_frr.json (750)"
+        n_planned: 400
+        judge: llama33_70b
+        adapter: chat_runner
+      - name: wildjailbreak_eval_adversarial_benign
+        download: wildjailbreak
+        source: "hf:allenai/wildjailbreak"
+        revision: null
+        split: "eval; data_type == adversarial_benign (210)"
+        n_planned: 210
+        judge: wildguard
+        adapter: chat_runner

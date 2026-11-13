@@ -1,0 +1,47 @@
+# Experiment output: large, regenerable, and (for runs/) contains attack payload text.
+runs/
+results/
+logs/
+payloads/
+juno_out/
+*.events.jsonl
+
+# Datasets and model weights are never committed: data/download_datasets.py fetches them.
+data/cache/
+data/*/
+!data/download_datasets.py
+*.safetensors
+*.gguf
+*.tar
+
+# Internal notes: planning, venue strategy, reviewer framing, and the running experiment log.
+# These must not reach a public or anonymised artifact. They live in the project workspace instead.
+docs/literature/novelty_memo.md
+docs/literature/venue_requirements.md
+docs/review/
+docs/experiment_log.md
+docs/experiment_notes.md
+
+# Secrets and local environment
+.env
+*.token
+hf_token*
+.hf_token
+secrets*
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+paper/

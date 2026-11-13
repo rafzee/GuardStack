@@ -1,0 +1,42 @@
+# Candidate models (none from banned entities). VERIFY on the cluster before the first run:
+# HF access/gating, vLLM version, tool-call parser, and that the model fits the GPU.
+# Sizes are approximate weights-only footprints.
+
+agents:            # targets wrapped by the guardrail stacks (native tool calling via vLLM)
+  # Decided Nov 3: gpt-oss-120b and Llama 3.3 70B both run from the start; Mistral Small 3.2 is the reserve.
+  llama33_70b:
+    id: meta-llama/Llama-3.3-70B-Instruct
+    # on-the-fly FP8 (Hopper) so it fits on GPU 0 and GPU 1 stays free for the guards; state this in the paper
+    vllm_args: "--enable-auto-tool-choice --tool-call-parser llama3_json --max-model-len 32768 --quantization fp8"
+    gpus: 1
+  gpt_oss_120b:
+    id: openai/gpt-oss-120b
+    vllm_args: "--enable-auto-tool-choice --tool-call-parser openai --max-model-len 32768"
+    gpus: 1          # MXFP4 ~65 GB
+  mistral_small_32:
+    id: mistralai/Mistral-Small-3.2-24B-Instruct-2506
+    vllm_args: "--enable-auto-tool-choice --tool-call-parser mistral --tokenizer-mode mistral --config-format mistral --load-format mistral --max-model-len 32768"
+    gpus: 1
+  llama31_8b:        # cheap model for harness debugging only
+    id: meta-llama/Llama-3.1-8B-Instruct
+    vllm_args: "--enable-auto-tool-choice --tool-call-parser llama3_json --max-model-len 32768"
+    gpus: 1
+
+attackers:         # adaptive / multi-turn attacker LLMs. Must be willing to write attacks;
+  mistral_small_32: {id: mistralai/Mistral-Small-3.2-24B-Instruct-2506}   # check refusal rate first
+  llama33_70b:     {id: meta-llama/Llama-3.3-70B-Instruct}
+
+guards_llm:        # LLM-based guard layers served on the second GPU
+  llamaguard4:     {id: meta-llama/Llama-Guard-4-12B}
+  llamaguard3_8b:  {id: meta-llama/Llama-Guard-3-8B}
+  alignment_judge: {id: meta-llama/Llama-3.3-70B-Instruct, note: "replaces LlamaFirewall's hosted default"}
+  nemoguard_cs:    {id: nvidia/llama-3.1-nemoguard-8b-content-safety, note: "Llama-based NeMo content-safety model; verify licence"}
+  gpt_oss_safeguard: {id: openai/gpt-oss-safeguard-20b}
+
+judges:            # only for datasets without a programmatic success check (AgentDojo needs none)
+  harmbench_cls:   {id: cais/HarmBench-Llama-2-13b-cls}
+  llamaguard4:     {id: meta-llama/Llama-Guard-4-12B}
+
+excluded_on_cluster:  # do not download, install or run (cluster restricted-vendor list)
+  - Qwen/Qwen3Guard-*
+  - any Qwen / QwQ / DeepSeek (incl. distills) / Kimi / GLM / Doubao / Seed-OSS / MiMo model or derivative

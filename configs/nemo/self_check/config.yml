@@ -1,0 +1,20 @@
+# Self-check input + output rails (LLM-as-judge with NeMo's default prompts).
+# The "main" model is ONLY the judge here: NemoRailsLayer disables dialog rails and fails if
+# NeMo ever asks it to generate a reply. In the stacks, nemo_in overrides this model and endpoint
+# with the job's judge (models: {main: ${GUARD_MODEL}}, base_url: ${GUARD_URL} = gpt-oss-20b);
+# the Llama-3.1-8B entry below is only the fallback for stand-alone use.
+models:
+  - type: main
+    engine: vllm
+    model: meta-llama/Llama-3.1-8B-Instruct
+    parameters:
+      base_url: http://127.0.0.1:8001/v1
+      api_key: EMPTY
+
+rails:
+  input:
+    flows:
+      - self check input
+  output:
+    flows:
+      - self check output

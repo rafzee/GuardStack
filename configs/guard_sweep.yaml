@@ -1,0 +1,53 @@
+# Guard-only sweep: each layer scored directly on labelled text, without running the agent.
+# Paths are relative to the data root written by data/download_datasets.py (<root>/<name>/...).
+# Column names are candidates tried in order; if none match, the loader stops and lists the real
+# columns -- send that error back rather than guessing.
+#
+# role: what the layer sees. prompt -> input-stage layers; tooltext -> tool_output-stage detectors;
+# response -> output-stage layers (with the prompt as context).
+# label: 1 = should be blocked, 0 = should pass.
+
+datasets:
+  harmbench:
+    files: ["harmbench/data/behavior_datasets/harmbench_behaviors_text_test.csv"]
+    text: [Behavior]
+    context: [ContextString]          # prepended for contextual behaviours
+    filter: {FunctionalCategory: [standard, contextual]}
+    label: 1
+    role: prompt
+  strongreject:
+    files: ["strongreject/strongreject_dataset/strongreject_dataset.csv"]
+    text: [forbidden_prompt, prompt]
+    label: 1
+    role: prompt
+  xstest:
+    files: ["xstest/xstest_prompts.csv", "xstest/xstest_v2_prompts.csv"]
+    text: [prompt]
+    label_from: {column: [label], map: {safe: 0, unsafe: 1}}
+    label_from_type_prefix: {column: [type], prefix: contrast_, positive: 1, negative: 0}   # fallback if no label column
+    role: prompt
+  notinject:
+    files: ["notinject/datasets/NotInject_one.json", "notinject/datasets/NotInject_two.json",
+            "notinject/datasets/NotInject_three.json"]
+    text: [prompt, text, sentence, input]
+    label: 0                          # benign text containing injection trigger words
+    role: [prompt, tooltext]
+  wildguardmix_prompts:
+    files: ["wildguardmix/**/*test*.parquet", "wildguardmix/**/*test*.jsonl", "wildguardmix/**/*test*.json"]
+    text: [prompt]
+    label_from: {column: [prompt_harm_label], map: {harmful: 1, unharmful: 0}}
+    role: prompt
+  wildguardmix_responses:
+    files: ["wildguardmix/**/*test*.parquet", "wildguardmix/**/*test*.jsonl", "wildguardmix/**/*test*.json"]
+    text: [response]
+    context: [prompt]
+    label_from: {column: [response_harm_label], map: {harmful: 1, unharmful: 0}}
+    role: response
+  agentdojo_payloads:                 # built in code: AgentDojo injection goals in static attack templates
+    builtin: agentdojo_payloads
+    label: 1
+    role: tooltext
+  agentdojo_benign_tooltext:          # built in code: tool outputs of AgentDojo ground-truth runs without injections
+    builtin: agentdojo_benign_tooltext
+    label: 0
+    role: tooltext

@@ -1,0 +1,24 @@
+# Retrieval rail applied to tool outputs (NemoRailsLayer rail=retrieval, stage=tool_output).
+# The tool output is placed in $relevant_chunks; NeMo's regex retrieval rail empties the chunks
+# when a pattern matches (a filter, not a stop), which the layer reports as a block
+# (modified_as_block=True). Patterns = guardstack.layers.builtin.DEFAULT_INJECTION_PATTERNS, so
+# this layer and `regex@tool_output` differ only by the NeMo machinery (a redundancy control).
+models: []
+
+rails:
+  config:
+    regex_detection:
+      retrieval:
+        case_insensitive: true
+        patterns:
+          - "ignore (all |any )?(the )?(previous|prior|above) (instructions|prompts?)"
+          - "<\\s*INFORMATION\\s*>"
+          - "this is an important message from me"
+          - "before you can solve the task"
+          - "new instructions?:"
+          - "system prompt"
+          - "you are now"
+          - "do not tell the user"
+  retrieval:
+    flows:
+      - regex check retrieval

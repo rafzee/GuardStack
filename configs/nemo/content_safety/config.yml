@@ -1,0 +1,21 @@
+# Llama-3.1-NemoGuard-8B content safety (NVIDIA Open Model License + Llama 3.1 Community
+# License; Llama-based, allowed by cluster policy). It ships as a LoRA adapter (r=16, also on lm_head) on
+# meta-llama/Llama-3.1-8B-Instruct. We merge it into full weights once
+# (slurm/merge_nemoguard.sbatch -> ~/work/models/llama-3.1-nemoguard-8b-content-safety-merged) and the
+# jobs serve that folder with --served-model-name llama-3.1-nemoguard-8b-content-safety on port 8005.
+# stacks.yaml passes base_url: ${NEMOGUARD_URL}; the base_url below is only the fallback.
+models:
+  - type: content_safety
+    engine: vllm
+    model: llama-3.1-nemoguard-8b-content-safety
+    parameters:
+      base_url: http://127.0.0.1:8001/v1
+      api_key: EMPTY
+
+rails:
+  input:
+    flows:
+      - content safety check input $model=content_safety
+  output:
+    flows:
+      - content safety check output $model=content_safety

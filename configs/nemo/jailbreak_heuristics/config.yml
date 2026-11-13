@@ -1,0 +1,17 @@
+# NeMo jailbreak detection heuristics: length/perplexity and prefix/suffix perplexity of the
+# input under GPT-2-large, computed in-process when no server_endpoint is set
+# (library/jailbreak_detection/heuristics/checks.py loads "gpt2-large" from HF at import).
+# On the cluster: pre-download openai-community/gpt2-large into HF_HOME, export HF_HUB_OFFLINE=1 and
+# JAILBREAK_CHECK_DEVICE=cuda. NOTE: if a server_endpoint is set and unreachable, NeMo logs a
+# warning and ALLOWS the input (silent fail-open inside the library).
+# Thresholds below are the library defaults (rail_config.py).
+models: []
+
+rails:
+  config:
+    jailbreak_detection:
+      length_per_perplexity_threshold: 89.79
+      prefix_suffix_perplexity_threshold: 1845.65
+  input:
+    flows:
+      - jailbreak detection heuristics
