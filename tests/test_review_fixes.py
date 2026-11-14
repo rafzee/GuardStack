@@ -158,3 +158,31 @@ def test_split_parallel_tool_calls_for_llama_templates():
     assert out[2]["content"] == "thinking" and out[4]["content"] is None
     one = [{"role": "assistant", "content": None, "tool_calls": [tc(1)]}, {"role": "tool", "tool_call_id": "c1", "content": "r"}]
     assert split(one) == one
+
+
+def test_rule_layers_tolerate_non_json_tool_args():
+    """Llama-3.3-70B once emitted a tool call whose parsed args held a Python Ellipsis
+    (reattack_llama opt_k3, workspace user_task_13 x injection_task_10). With empty tool
+    output the regex layer falls back to the call's args; plain json.dumps raised TypeError
+    and errored the attempt. Rule layers must serialize args with default=str."""
+    from agentdojo.functions_runtime import FunctionCall
+    from guardstack.layers.base import CheckContext
+    from guardstack.layers.builtin import RegexLayer, SubstringLayer
+    from guardstack.types import Stage
+    call = FunctionCall.model_construct(function="send_email", args={"recipients": ["a@b.c"], "body": ...})
+    ctx = CheckContext(stage=Stage.TOOL_OUTPUT, text="", tool_call=call)
+    assert RegexLayer(stage="tool_output").check(ctx).block is False
+    assert SubstringLayer(["ellipsis"], stage="tool_output").check(ctx).block is True
+
+
+def test_attacker_stats_accumulate_across_resumed_jobs():
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("run_adaptive", Path(__file__).parent.parent / "scripts" / "run_adaptive.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    a = {"attacker_calls": 10, "attacker_refusals": 1, "refusal_rate": 0.1, "prompt_tokens": 100, "completion_tokens": 50}
+    b = {"attacker_calls": 30, "attacker_refusals": 3, "refusal_rate": 0.1, "prompt_tokens": 300, "completion_tokens": 70}
+    s = m.merge_attacker_stats(a, b)
+    assert s["attacker_calls"] == 40 and s["completion_tokens"] == 120 and abs(s["refusal_rate"] - 0.1) < 1e-12
+    assert m.merge_attacker_stats(None, b)["attacker_calls"] == 30

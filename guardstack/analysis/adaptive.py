@@ -102,7 +102,7 @@ def _closeness(a: dict) -> tuple:
     """How far an attempt got: success > reached the target action > no layer fired > stopped by
     a later layer of the stack > more recent."""
     o = outcome(a)
-    depth = len(a["layers"]) if o in (SUCCESS, UNSTOPPED_FAIL) else a["layers"].index(o)
+    depth = len(a["layers"]) if o in (SUCCESS, UNSTOPPED_FAIL) else evaluation_order(a["layers"]).index(o)
     return (a["success"], a["reached_target"], o == UNSTOPPED_FAIL, depth, a["k"])
 
 
@@ -119,6 +119,28 @@ def representative(attempts: Sequence[dict], mode: str = "best") -> dict | None:
     raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
 
 
+# Order in which an indirect injection meets the stages of guardstack.pipeline: the injected tool
+# result is checked (tool_output) before the agent's next proposed call, which is checked by trace
+# layers before action layers (GuardedToolsExecutor); output layers see only the final message.
+# Stage.order is the order WITHIN one tool step and ranks tool_output last, so it is not used here.
+IPI_STAGE_RANK = {"input": 0, "tool_output": 1, "trace": 2, "action": 3, "output": 4}
+
+
+def evaluation_order(layers: Sequence[str]) -> list[str]:
+    """Layer names ("name@stage") in the order the enforced pipeline evaluates them against an
+    indirect injection: by stage (IPI_STAGE_RANK), then by position in the stack. MBR(k) conditions
+    on the layers evaluated before k, so it must follow this order, not the listing order: in stack
+    E (listed pg2, lg_out, gate, spot, align) AlignmentCheck sees each proposed call before the gate,
+    and conditioning in listing order would charge the gate with cases it never saw."""
+    def rank(item):
+        i, name = item
+        stage = name.rsplit("@", 1)[-1] if "@" in name else ""
+        if stage not in IPI_STAGE_RANK:
+            raise ValueError(f"layer {name!r}: cannot tell its stage (expected name@<stage>)")
+        return IPI_STAGE_RANK[stage], i
+    return [name for _, name in sorted(enumerate(layers), key=rank)]
+
+
 def outcome(a: dict) -> str:
     """SUCCESS, the first layer that fired (time order; ties by stack order), or UNSTOPPED_FAIL."""
     if a["success"]:
@@ -126,7 +148,7 @@ def outcome(a: dict) -> str:
     fired = [l for l in a["layers"] if a["fired"].get(l)]
     if not fired:
         return UNSTOPPED_FAIL
-    pos = {l: i for i, l in enumerate(a["layers"])}
+    pos = {l: i for i, l in enumerate(evaluation_order(a["layers"]))}
     return min(fired, key=lambda l: (a["first_fire_seq"].get(l, float("inf")), pos[l]))
 
 
@@ -151,7 +173,7 @@ def _mbr_rows(outcomes: np.ndarray, order: Sequence[str]) -> list[dict]:
 
 def sequential_mbr(cases: dict[str, list[dict]], mode: str = "best", order: Sequence[str] | None = None,
                    effective: Iterable[str] | None = None, n_boot: int = 2000) -> tuple[pd.DataFrame, dict]:
-    """MBR(k) along ``order`` (default: the stack's own order) on one attempt per case.
+    """MBR(k) along ``order`` (default: ``evaluation_order`` of the stack) on one attempt per case.
 
     Returns (table indexed by layer: pos, survivors_in, stopped, mbr, lo, hi; summary dict).
     ``effective``: case ids to compute MBR over (see module docstring); None = all cases.
@@ -160,7 +182,7 @@ def sequential_mbr(cases: dict[str, list[dict]], mode: str = "best", order: Sequ
     reps = {c: a for c, a in reps.items() if a is not None}
     if not reps:
         return pd.DataFrame(), {"n_cases": 0}
-    order = list(order or next(iter(reps.values()))["layers"])
+    order = list(order or evaluation_order(next(iter(reps.values()))["layers"]))
     n_all = len(reps)
     n_success_all = sum(a["success"] for a in reps.values())
     ids = sorted(c for c in reps if effective is None or c in set(effective))
@@ -196,7 +218,7 @@ def pooled_mbr(cases: dict[str, list[dict]], order: Sequence[str] | None = None,
     atts = [a for c, at in cases.items() if eff is None or c in eff for a in at if not (skip_static and a["k"] == 1)]
     if not atts:
         return pd.DataFrame()
-    order = list(order or atts[0]["layers"])
+    order = list(order or evaluation_order(atts[0]["layers"]))
     rows = _mbr_rows(np.array([outcome(a) for a in atts], dtype=object), order)
     return pd.DataFrame(rows).set_index("layer") if rows else pd.DataFrame()
 
@@ -227,13 +249,13 @@ def mbr_shift(cases: dict[str, list[dict]], bare: dict[str, list[dict]] | None =
 
 # ---------------------------------------------------------------------------- what an enforced run shows of rho
 def cofire_table(cases: dict[str, list[dict]], mode: str = "best") -> pd.DataFrame:
-    """For each ordered pair (i before j in the stack): on how many representative attempts both
+    """For each ordered pair (i evaluated before j, see ``evaluation_order``): on how many representative attempts both
     verdicts were observed (the session was not ended by another layer first), and how often each
     fired there. Shows why rho is not identified from an enforced run; not an estimate of rho."""
     reps = [a for a in (representative(at, mode) for at in cases.values()) if a is not None]
     if not reps:
         return pd.DataFrame()
-    layers = reps[0]["layers"]
+    layers = evaluation_order(reps[0]["layers"])
     rows = []
     for x, i in enumerate(layers):
         for j in layers[x + 1:]:

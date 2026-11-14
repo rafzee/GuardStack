@@ -38,7 +38,7 @@ class RegexLayer(GuardLayer):
         self.patterns = [re.compile(p, re.IGNORECASE) for p in (patterns or DEFAULT_INJECTION_PATTERNS)]
 
     def check(self, ctx: CheckContext) -> Verdict:
-        text = ctx.text or (json.dumps(ctx.tool_call.args) if ctx.tool_call else "")
+        text = ctx.text or (json.dumps(ctx.tool_call.args, default=str) if ctx.tool_call else "")
         for p in self.patterns:
             if p.search(text):
                 return Verdict(block=True, score=1.0, reason=f"pattern:{p.pattern[:40]}")
@@ -192,7 +192,7 @@ class SubstringLayer(GuardLayer):
         self.needles = [n.lower() for n in needles]
 
     def check(self, ctx: CheckContext) -> Verdict:
-        t = (ctx.text or (json.dumps(ctx.tool_call.args) if ctx.tool_call else "")).lower()
+        t = (ctx.text or (json.dumps(ctx.tool_call.args, default=str) if ctx.tool_call else "")).lower()
         hit = next((n for n in self.needles if n in t), None)
         return Verdict(block=hit is not None, score=1.0 if hit else 0.0, reason=hit)
 

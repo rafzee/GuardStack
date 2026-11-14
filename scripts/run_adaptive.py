@@ -89,6 +89,14 @@ def sample_cases(cases: list, frac: float, seed: int, base: float | None = None)
     return sorted((c for v in picked.values() for c in v), key=lambda c: c.case_id)
 
 
+def merge_attacker_stats(old: dict | None, new: dict) -> dict:
+    """Sum the counters of two attacker_stats files and recompute the refusal rate."""
+    keys = ("attacker_calls", "attacker_refusals", "prompt_tokens", "completion_tokens")
+    out = {k: (old or {}).get(k, 0) + new.get(k, 0) for k in keys}
+    out["refusal_rate"] = out["attacker_refusals"] / max(1, out["attacker_calls"])
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--stack-config", default=str(ROOT / "configs" / "stacks.yaml"))
@@ -207,7 +215,10 @@ def main() -> None:
                              stack.id, rate, _hm(mins), _hm((len(todo) - n) / rate if rate else 0.0), failed)
     if isinstance(proposer, LLMProposer):
         stats = proposer.stats()
-        (out / f"attacker_stats_shard{args.shard:03d}.json").write_text(json.dumps(stats, indent=2))
+        # a resumed or extended run (--sample-base) adds to the earlier jobs' counts instead of replacing them
+        sp = out / f"attacker_stats_shard{args.shard:03d}.json"
+        stats = merge_attacker_stats(json.loads(sp.read_text()) if sp.exists() else None, stats)
+        sp.write_text(json.dumps(stats, indent=2))
         logging.info("attacker: %s", stats)
 
 

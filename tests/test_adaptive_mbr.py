@@ -5,13 +5,14 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from guardstack.analysis import adaptive as A  # noqa: E402
 
-L1, L2, L3 = "cheap@tool_output", "gate@action", "monitor@trace"
+L1, L2, L3 = "cheap@tool_output", "gate@action", "monitor@output"   # listed in evaluation order
 LAYERS = [L1, L2, L3]
 
 
@@ -170,3 +171,26 @@ def test_each_attempt_keeps_its_own_payload(tmp_path):
     assert {a["payload"] for c in cases.values() for a in c} == {f"payload-u{i}-k{k}" for i in (1, 2) for k in (1, 2)}
     assert A.representative(cases["s/u1/i1"], "best")["payload"] == "payload-u1-k2"   # the attempt that worked
     assert A.representative(cases["s/u2/i2"], "static")["payload"] == "payload-u2-k1"
+
+
+def test_mbr_conditions_in_evaluation_order_not_listing_order(tmp_path):
+    """Stack E lists the gate (action) before AlignmentCheck (trace), but the pipeline runs trace
+    layers first on each proposed call. MBR must condition in evaluation order: the gate's
+    denominator is what AlignmentCheck let through, not every case the earlier filter passed."""
+    pg, lg, gate, spot, align = ("pg2@tool_output", "lg@output", "gate@action",
+                                 "spot@tool_output", "align@trace")
+    listed = [pg, lg, gate, spot, align]
+    assert A.evaluation_order(listed) == [pg, spot, align, gate, lg]
+    with pytest.raises(ValueError):
+        A.evaluation_order(["no_stage_suffix"])
+    # 10 effective cases: pg2 stops 2, align stops 6, the gate stops 1 of the 2 align passed, 1 succeeds
+    plan = [pg] * 2 + [align] * 6 + [gate] + [None]
+    recs = [rec(f"s/u{i}/i{i % 3}", 1, success=who is None, fired=[who] if who else [], aborted=who,
+                layers=listed) for i, who in enumerate(plan)]
+    write(tmp_path / "E" / "tag", recs)
+    cases = A.load_attempts(tmp_path / "E" / "tag")
+    table, summary = A.sequential_mbr(cases, "static", n_boot=0)
+    assert list(table.index) == [pg, spot, align, gate, lg]
+    assert np.isclose(table.loc[align, "mbr"], 6 / 8) and table.loc[gate, "survivors_in"] == 2
+    assert np.isclose(table.loc[gate, "mbr"], 1 / 2)                 # listing order would give 1/8
+    assert summary["success_effective"] == 1

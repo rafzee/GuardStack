@@ -23,8 +23,8 @@ from guardstack.analysis import assignment, report, selection, structure  # noqa
 from guardstack.analysis.metrics import twoway_bootstrap  # noqa: E402
 
 # Nested stack B->E order; real layer names (configs/stacks.yaml) and synthetic ones, filtered by presence.
-NESTED_E = ["promptguard2@input", "promptguard2@tool_output", "llamaguard4@output", "llamaguard@output",
-            "tool_gate@action", "provenance_gate@action", "alignment_check@trace"]
+NESTED_E = ["promptguard2@input", "promptguard2@tool_output", "alignment_check@trace", "tool_gate@action",
+            "provenance_gate@action", "llamaguard4@output", "llamaguard@output"]   # evaluation order
 
 
 def load_records(paths) -> list[dict]:
@@ -46,14 +46,17 @@ def load_records(paths) -> list[dict]:
 
 
 def nested_order(stack_config: Path, stack_id: str, layers: list[str]) -> list[str]:
-    """Layer order of a configured stack (transform layers dropped: they have no verdicts)."""
+    """Layer order of a configured stack as the enforced pipeline evaluates it against an indirect
+    injection (``evaluation_order``: tool_output, trace, action, output), transform layers dropped
+    (they have no verdicts). Same order as the adaptive MBR tables, so the two are comparable."""
+    from guardstack.analysis.adaptive import evaluation_order
     from guardstack.stacks import load_stacks
     st = load_stacks(stack_config)[stack_id]
     names = [l.name for l in st.build() if getattr(l, "family", "") != "transform"]
     missing = [n for n in names if n not in layers]
     if missing:
         raise SystemExit(f"stack {stack_id} layers missing from the verdict matrix: {missing}")
-    return names
+    return evaluation_order(names)
 
 
 def main() -> None:
