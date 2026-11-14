@@ -268,6 +268,12 @@ def cofire_table(cases: dict[str, list[dict]], mode: str = "best") -> pd.DataFra
 
 
 def find_runs(run_dir: Path) -> dict[tuple[str, str], Path]:
-    """(stack, attack tag) -> folder, for every adaptive result folder under a run."""
-    return {(f.parent.parent.name, f.parent.name): f.parent for f in sorted(Path(run_dir).rglob("*.histories.jsonl"))}
+    """(stack, attack tag) -> folder, for every adaptive result folder under a run. A (stack, tag) found
+    in two folders is an error: silently keeping one would analyze whichever copy sorts last."""
+    runs: dict[tuple[str, str], Path] = {}
+    for f in sorted(Path(run_dir).rglob("*.histories.jsonl")):
+        key, folder = (f.parent.parent.name, f.parent.name), f.parent
+        if runs.setdefault(key, folder) != folder:
+            raise ValueError(f"stack {key[0]!r} / {key[1]!r} found twice: {runs[key]} and {folder}")
+    return runs
 

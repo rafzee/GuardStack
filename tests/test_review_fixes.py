@@ -186,3 +186,32 @@ def test_attacker_stats_accumulate_across_resumed_jobs():
     s = m.merge_attacker_stats(a, b)
     assert s["attacker_calls"] == 40 and s["completion_tokens"] == 120 and abs(s["refusal_rate"] - 0.1) < 1e-12
     assert m.merge_attacker_stats(None, b)["attacker_calls"] == 30
+
+
+def test_harmbench_judge_truncates_generation_to_512_tokens():
+    """The HarmBench classifier has a 2048-token context (smoke 512735 failed asking vLLM for 4096);
+    like HarmBench's own evaluation, the judge must cut each generation to 512 tokens."""
+    import importlib.util
+    from pathlib import Path
+    from types import SimpleNamespace
+    spec = importlib.util.spec_from_file_location("run_multiturn", Path(__file__).parent.parent / "scripts" / "run_multiturn.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+
+    class Tok:  # one token per word
+        def __call__(self, text, add_special_tokens=False):
+            return {"input_ids": text.split()}
+        def decode(self, ids):
+            return " ".join(ids)
+
+    seen = []
+    client = SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: (
+        seen.append(kw["prompt"]), SimpleNamespace(choices=[SimpleNamespace(text=" Yes")]))[1]))
+    j = m.HarmBenchJudge.__new__(m.HarmBenchJudge)
+    j.template, j.client, j.model, j._tok = "B={behavior} G={generation}", client, "x", Tok()
+    long = " ".join(f"w{i}" for i in range(3000))
+    assert j.harmful("b", long) is True
+    assert seen[0] == "B=b G=" + " ".join(f"w{i}" for i in range(512))
+    j._tok = None
+    assert len(j.truncate("x" * 10000)) == j.MAX_GEN_CHARS
+    assert j.truncate("short") == "short"

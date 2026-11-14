@@ -194,3 +194,11 @@ def test_mbr_conditions_in_evaluation_order_not_listing_order(tmp_path):
     assert np.isclose(table.loc[align, "mbr"], 6 / 8) and table.loc[gate, "survivors_in"] == 2
     assert np.isclose(table.loc[gate, "mbr"], 1 / 2)                 # listing order would give 1/8
     assert summary["success_effective"] == 1
+
+
+def test_find_runs_rejects_a_stack_found_twice(tmp_path):
+    write(tmp_path / "C" / "tag", [rec("s/u1/i1", 1, success=True)])
+    assert set(A.find_runs(tmp_path)) == {("C", "tag")}
+    write(tmp_path / "A_bare" / "C" / "tag", [rec("s/u1/i1", 1, success=True)])
+    with pytest.raises(ValueError, match="found twice"):
+        A.find_runs(tmp_path)

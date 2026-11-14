@@ -26,9 +26,9 @@ export ATTACKER_MODEL=${ATTACKER_MODEL:-mistralai/Mistral-Small-3.2-24B-Instruct
 export JUDGE_MODEL=${JUDGE_MODEL:-cais/HarmBench-Llama-2-13b-cls}
 ATTACKER_ARGS=${ATTACKER_ARGS:-"--tokenizer-mode mistral --config-format mistral --load-format mistral --quantization fp8"}
 # GPU1 split (H200, ~143 GB; fractions sum to 0.95). Weights: Llama Guard 4 ~24 GB, gpt-oss-20b ~14 GB,
-# Mistral FP8 ~25 GB, HarmBench 13B ~26 GB. Context caps keep vLLM from reserving KV cache for each
+# Mistral FP8 ~25 GB, HarmBench 13B ~26 GB (its context is 2048 tokens; the judge truncates generations to 512). Context caps keep vLLM from reserving KV cache for each
 # model's full native context (128k for LG4 and Mistral), which is what failed smoke 511258 at 0.20.
-export GUARD_MODELS=${GUARD_MODELS:-"$LLAMAGUARD_MODEL|1|8001|0.28|--max-model-len 32768; $GUARD_MODEL|1|8002|0.17; $ATTACKER_MODEL|1|8003|0.25|$ATTACKER_ARGS --max-model-len 32768; $JUDGE_MODEL|1|8004|0.25|--max-model-len 4096"}
+export GUARD_MODELS=${GUARD_MODELS:-"$LLAMAGUARD_MODEL|1|8001|0.28|--max-model-len 32768; $GUARD_MODEL|1|8002|0.17; $ATTACKER_MODEL|1|8003|0.25|$ATTACKER_ARGS --max-model-len 32768; $JUDGE_MODEL|1|8004|0.25|--max-model-len 2048"}
 export LLAMAGUARD_URL=http://127.0.0.1:8001/v1 GUARD_URL=http://127.0.0.1:8002/v1
 export ATTACKER_URL=http://127.0.0.1:8003/v1 JUDGE_URL=http://127.0.0.1:8004/v1
 NUM_SHARDS=${NUM_SHARDS:-${SLURM_ARRAY_TASK_COUNT:-1}}
